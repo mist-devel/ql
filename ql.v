@@ -73,14 +73,14 @@ parameter CONF_STR = {
         "F,MDV,Load MDV1;",
         "F,MDV,Load MDV2;",
         "F,ROM;",
-        "O2,MDV direction,normal,reverse;",
+        "O2,QL Speed,NO,YES;",
         "O3,RAM,128k,640k;",
         "O4,Video mode,PAL,NTSC;",
         "O5,Scanlines,Off,On;",
         "T6,Reset"
 };
 
-parameter CONF_STR_LEN = 4+16+16+6+32+17+23+20+8;
+parameter CONF_STR_LEN = 4+16+16+6+19+17+23+20+8;
 
 // the status register is controlled by the on screen display (OSD)
 wire [7:0] status;
@@ -201,8 +201,9 @@ assign SDRAM_CKE = 1'b1;
 // CPU and data_io share the same bus cycle. Thus the CPU cannot run while
 // (ROM) data is being downloaded which wouldn't make any sense, anyway
 // during ROM download data_io writes the ram. Otherwise the CPU
-wire [24:0] sys_addr = dio_download?dio_addr[24:0]:{ 6'b000000, cpu_addr[19:1]};
-wire [1:0] sys_ds =    dio_download?2'b11:~cpu_ds;
+wire [24:0] sys_addr = dio_download?dio_addr[24:0]:{ 6'b000000, cpu_addr[19:1]} ;
+wire sys_uds = dio_download?1'b1:cpu_uds;
+wire sys_lds = dio_download?1'b1:cpu_lds;
 wire [15:0] sys_dout = dio_download?dio_data:cpu_dout;
 wire sys_wr =          dio_download?dio_write:(cpu_wr && cpu_ram);
 wire sys_oe =          dio_download?1'b0:(cpu_rd && cpu_mem);
@@ -217,7 +218,8 @@ wire video_cycle_rd = (mdv_read || mdv2_read)?1'b1:video_rd;
 wire [24:0] sdram_addr = video_cycle?video_cycle_addr:sys_addr;
 wire sdram_wr = video_cycle?1'b0:sys_wr;
 wire sdram_oe = video_cycle?video_cycle_rd:sys_oe;
-wire [1:0] sdram_ds = video_cycle?2'b11:sys_ds;
+wire sdram_uds = video_cycle?1'b1:sys_uds;
+wire sdram_lds = video_cycle?1'b1:sys_lds;
 wire [15:0] sdram_dout;
 wire [15:0] sdram_din = sys_dout;
 
@@ -242,7 +244,8 @@ sdram sdram (
    .addr           ( sdram_addr                ),
    .we             ( sdram_wr                  ),
    .oe             ( sdram_oe                  ),
-   .ds             ( sdram_ds                  ),
+	.uds            ( sdram_uds                 ),
+	.lds            ( sdram_lds                 ),
    .dout           ( sdram_dout                )
 );
 
@@ -282,13 +285,14 @@ data_io data_io (
 
 wire [5:0] video_r, video_g, video_b;
 wire video_hs, video_vs;
+wire VBlank;
 
 wire [18:0] video_addr;
 wire video_rd;
 
 // the zx8301 has only one write-only register at $18063
 wire zx8301_cs = cpu_cycle && cpu_io && 
-	({cpu_addr[6:5], cpu_addr[1]} == 3'b111)&& cpu_wr && !cpu_ds[0];
+	({cpu_addr[6:5], cpu_addr[1]} == 3'b111)&& cpu_wr && cpu_lds;	
 
 zx8301 zx8301 (
     .reset        ( reset         ),
@@ -314,7 +318,8 @@ zx8301 zx8301 (
 	 .vs           ( video_vs      ),
 	 .r            ( video_r       ),
 	 .g            ( video_g       ),
-	 .b            ( video_b       )
+	 .b            ( video_b       ),
+	 .VBlank			( VBlank			 )
 );
 
 
@@ -404,7 +409,8 @@ zx8302 zx8302 (
 	.cpu_sel      ( zx8302_sel   ),
 	.cpu_wr       ( cpu_wr       ),
 	.cpu_addr     ( zx8302_addr  ),
-	.cpu_ds       ( cpu_ds       ),
+	.cpu_uds      ( cpu_uds      ),
+	.cpu_lds      ( cpu_lds      ),
 	.cpu_din      ( cpu_dout     ),
 	.cpu_dout     ( zx8302_dout  ),
 
@@ -426,7 +432,7 @@ zx8302 zx8302 (
 	.mdv_men      ( mdv_men      ),
 	.video_cycle  ( video_cycle  ),
 	
-	.mdv_reverse  ( status[2]    ),
+	.mdv_reverse  ( 0    ),
 
 	.mdv_download ( mdv_download ),
 	.mdv2_download ( mdv2_download ),
@@ -486,9 +492,13 @@ wire [15:0] cpu_din =
 	16'hffff;
 
 wire [31:0] cpu_addr;
-wire [1:0] cpu_ds;
 wire [15:0] cpu_dout;
 wire [1:0] cpu_ipl;
+wire [1:0] cpu_ds;
+wire cpu_uds_n;
+wire cpu_lds_n;
+wire cpu_uds = !cpu_uds_n;
+wire cpu_lds = !cpu_lds_n;
 wire cpu_rw;
 wire [1:0] cpu_busstate;
 wire cpu_rd = (cpu_busstate == 2'b00) || (cpu_busstate == 2'b10);
@@ -497,7 +507,7 @@ wire cpu_idle = (cpu_busstate == 2'b01);
 
 reg cpu_enable;
 always @(negedge clk2)
-	cpu_enable <= (cpu_cycle && !dio_download) || cpu_idle;
+	cpu_enable <= ((cpu_cycle && !dio_download) || cpu_idle) && !ram_delay_dtack;
 
 TG68KdotC_Kernel #(0,0,0,0,0,0) tg68k (
         .clk            ( clk2      ),
@@ -509,10 +519,10 @@ TG68KdotC_Kernel #(0,0,0,0,0,0) tg68k (
         .berr           ( 1'b0           ),
         .clr_berr       ( 1'b0           ),
         .CPU            ( 2'b00          ),   // 00=68000
-		  .addr           ( cpu_addr       ),
+		  .addr_out       ( cpu_addr       ),
         .data_write     ( cpu_dout       ),
-        .nUDS           ( cpu_ds[1]      ),
-        .nLDS           ( cpu_ds[0]      ),
+        .nUDS           ( cpu_uds_n      ),
+        .nLDS           ( cpu_lds_n      ),
         .nWr            ( cpu_rw         ),
         .busstate       ( cpu_busstate   ), // 00-> fetch code 10->read data 11->write data 01->no memaccess
         .nResetOut      (                ),
@@ -550,6 +560,41 @@ pll pll (
 	 .c0(     clk21      ),       // 21.000 MHz
 	 .c1(     SDRAM_CLK   ),       // 21.000 MHz phase shifted
 	 .locked( pll_locked  )
+);
+
+
+// ---------------------------------------------------------------------------------
+// -------------------------------------- QL RAM timing-----------------------------
+// ---------------------------------------------------------------------------------
+
+wire ram_delay_dtack;
+
+//old
+//ql_timing ql_timing (
+//	.clk_sys		( clk21 ),
+//	.reset		( reset ),
+//	.enable		( status[2] ),
+//	.ce_bus_p	( clk2 ),
+//	.VBlank		( VBlank ),
+//	.cpu_uds		( cpu_uds),
+//	.cpu_lds		( cpu_lds),
+//	.sdram_wr	( sdram_wr ),
+//	.sdram_oe	( sdram_oe ),
+//	.ram_delay_dtack (ram_delay_dtack)
+//);
+
+//new
+ql_timing ql_timing (
+	.clk_sys		( clk21 ),
+	.reset		( reset ),
+	.enable		( status[2] ),
+	.ce_bus_p	( clk2 ),
+	.VBlank		( VBlank ),
+	.cpu_uds		( cpu_uds ),
+	.cpu_lds		( cpu_lds ),
+	.cpu_rw		( cpu_rw),
+	.cpu_rom		( cpu_rom),
+	.ram_delay_dtack (ram_delay_dtack)
 );
 
 

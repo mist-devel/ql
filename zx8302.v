@@ -5,6 +5,7 @@
 // https://github.com/mist-devel
 // 
 // Copyright (c) 2015 Till Harbaum <till@harbaum.org> 
+// Copyright (c) 2021 Daniele Terdina
 // 
 // This source file is free software: you can redistribute it and/or modify 
 // it under the terms of the GNU General Public License as published 
@@ -65,11 +66,21 @@ module zx8302 (
 		input				cpu_sel,
 		input				cpu_wr,
 		input [1:0] 	cpu_addr,      // a[5,1]
-		input [1:0] 	cpu_ds,
+		input				cpu_uds,
+		input				cpu_lds,
 		input [15:0]   cpu_din,
 		output [15:0]  cpu_dout
 		
 );
+
+
+// comdata shift register
+wire ipc_comdata_in = comdata_reg[0];
+reg [3:0] comdata_reg /* synthesis noprune */;
+reg [1:0] ipc_busy;
+reg comdata_to_cpu;
+reg prev_ipc_comctrl;
+
 
 // ---------------------------------------------------------------------------------
 // ----------------------------- CPU register write --------------------------------
@@ -77,25 +88,25 @@ module zx8302 (
 
 reg [7:0] mctrl;
 
-reg ipc_write;
-reg [3:0] ipc_write_data;
-
 // cpu is writing io registers
 always @(negedge clk_bus) begin
+	if (reset) begin
+		comdata_reg <= 4'b0000;
+		ipc_busy <= 2'b11;
+	end
 	irq_ack <= 5'd0;
-	ipc_write <= 1'b0;
 	
 	// cpu writes to 0x18XXX area
 	if(cpu_sel && cpu_wr) begin
-		// even addresses have lds=0 and use the lower 8 data bus bits
-		if(!cpu_ds[1]) begin
+		// even addresses have uds asserted and use the upper 8 data bus bits
+		if(cpu_uds) begin
 			// cpu writes microdrive control register
 			if(cpu_addr == 2'b10)
 				mctrl <= cpu_din[15:8];
 		end
 
-		// odd addresses have lds=0 and use the lower 8 data bus bits
-		if(!cpu_ds[0]) begin
+		// odd addresses have lds asserted and use the lower 8 data bus bits
+		if(cpu_lds) begin
 			// 18003 - IPCWR
 			// (host sends a single bit to ipc)
 			if(cpu_addr == 2'b01) begin
@@ -104,8 +115,8 @@ always @(negedge clk_bus) begin
 				// D = data bit (0/1)
 				// E = stop bit (should be 1)
             // X = extra stopbit (should be 1)
-				ipc_write <= 1'b1;
-				ipc_write_data <= cpu_din[3:0];
+				comdata_reg <= cpu_din[3:0];
+				ipc_busy <= 2'b11;		// Show IPC BUSY until the IPC asserts COMCTL twice
          end
 
 			// cpu writes interrupt register
@@ -115,6 +126,12 @@ always @(negedge clk_bus) begin
 			end
 		end
 	end
+	if (!ipc_comctrl && prev_ipc_comctrl) begin
+		comdata_to_cpu <= zx8302_comdata_in;	// Latch COMDATA since the IPC will quickly reset it to 1 when sending data
+		comdata_reg <= { 1'b1, comdata_reg[3:1] };
+		ipc_busy <= { 1'b0, ipc_busy[1] };
+	end
+	prev_ipc_comctrl <= ipc_comctrl;
 end
 
 // ---------------------------------------------------------------------------------
@@ -131,7 +148,7 @@ end
 // bit 6       IPC busy
 // bit 7       COMDATA
 
-wire [7:0] io_status = { zx8302_comdata_in, ipc_busy, 2'b00,
+wire [7:0] io_status = { comdata_to_cpu, ipc_busy[0], 2'b00,
 		(mdv_seldrive?mdv2_gap:mdv_gap), 
 		(mdv_seldrive?mdv2_rx_ready:mdv_rx_ready), 
 		(mdv_seldrive?mdv2_tx_empty:mdv_tx_empty), 1'b0 };
@@ -157,27 +174,7 @@ wire ipc_comdata_out;
 // 8302 sees its own comdata as well as the one from the ipc
 wire zx8302_comdata_in = ipc_comdata_in && ipc_comdata_out;
 
-// comdata shift register
-wire ipc_comdata_in = comdata_reg[0];
-reg [3:0] comdata_reg /* synthesis noprune */;
-reg [1:0] comdata_cnt /* synthesis noprune */; 
 
-always @(negedge ipc_comctrl or posedge reset or posedge ipc_write) begin
-	if(reset) begin
-		comdata_reg <= 4'b0000;
-		comdata_cnt <= 2'd0;
-	end else if(ipc_write) begin
-		comdata_reg <= ipc_write_data;
-		comdata_cnt <= 2'd2;
-	end else begin
-		comdata_reg <= { 1'b0, comdata_reg[3:1] };
-		if(comdata_cnt != 0)
-			comdata_cnt <= comdata_cnt - 2'd1;
-	end
-end
-
-// comdata is busy until two bits have been shifted out
-wire ipc_busy = (comdata_cnt != 0);
 
 wire [1:0] ipc_ipl;
 
@@ -203,8 +200,7 @@ ipc ipc (
 // -------------------------------------- IRQs -------------------------------------
 // ---------------------------------------------------------------------------------
 
-wire [7:0] irq_pending = {1'b0, (mdv_sel == 0), clk64k,
-		xint_irq, vsync_irq, 1'b0, 1'b0, gap_irq };
+wire [7:0] irq_pending = {1'b0, (mdv_sel == 0), clk64k, xint_irq, vsync_irq, 1'b0, 1'b0, gap_irq };
 reg [2:0] irq_mask;
 reg [4:0] irq_ack;
 
@@ -214,27 +210,36 @@ assign ipl = { ipc_ipl[1] && (irq_pending[4:0] == 0), ipc_ipl[0] };
 // vsync irq is set whenever vsync rises
 reg vsync_irq;
 wire vsync_irq_reset = reset || irq_ack[3];
-always @(posedge vs or posedge vsync_irq_reset) begin
-	if(vsync_irq_reset) 	vsync_irq <= 1'b0;
-	else	      	     	vsync_irq <= 1'b1;
+always @(posedge clk) begin
+	reg old_vs;
+	
+	old_vs <= vs;
+	if(vsync_irq_reset)   vsync_irq <= 1'b0;
+	else if(~old_vs & vs) vsync_irq <= 1'b1;
 end
 
 // toggling the mask will also trigger irqs ...
 wire gap_irq_in = (mdv_seldrive?mdv2_gap:mdv_gap) && irq_mask[0];
 reg gap_irq;
 wire gap_irq_reset = reset || irq_ack[0];
-always @(posedge gap_irq_in or posedge gap_irq_reset) begin
-	if(gap_irq_reset) 	gap_irq <= 1'b0;
-	else	      	     	gap_irq <= 1'b1;
+always @(posedge clk) begin
+	reg old_irq;
+	
+	old_irq <= gap_irq_in;
+	if(gap_irq_reset)              gap_irq <= 1'b0;
+	else if(~old_irq & gap_irq_in) gap_irq <= 1'b1;
 end
 
 // toggling the mask will also trigger irqs ...
 wire xint_irq_in = xint && irq_mask[2];
 reg xint_irq;
 wire xint_irq_reset = reset || irq_ack[4];
-always @(posedge xint_irq_in or posedge xint_irq_reset) begin
-	if(xint_irq_reset) 	xint_irq <= 1'b0;
-	else	      	     	xint_irq <= 1'b1;
+always @(posedge clk) begin
+	reg old_irq;
+	
+	old_irq <= xint_irq_in;
+	if(xint_irq_reset)              xint_irq <= 1'b0;
+	else if(~old_irq & xint_irq_in) xint_irq <= 1'b1;
 end
 
 
@@ -313,9 +318,12 @@ mdv mdv2 (
 // the microdrive control register mctrl generates the drive selection
 // mdv_sel = 1 for mdv1_, mdv_sel = 2 for mdv2_
 reg [7:0] mdv_sel;
-
-always @(negedge mctrl[1])
-	mdv_sel <= { mdv_sel[6:0], mctrl[0] };
+always @(posedge clk) begin
+	reg old_mctrl;
+	
+	old_mctrl <= mctrl[1];
+	if(old_mctrl & ~mctrl[1]) mdv_sel <= { mdv_sel[6:0], mctrl[0] };
+end
 
 // 0 for MDV1_ or nothing and 1 for MDV2_
 // Only one microdrive can be accessed at a time, this allows
