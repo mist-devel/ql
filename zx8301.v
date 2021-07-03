@@ -51,7 +51,8 @@ module zx8301 (
    output reg 	vs,
    output [5:0] r,
    output [5:0] g,
-   output [5:0] b
+   output [5:0] b,
+   output reg VBlank
 );
 
 assign rd = me;
@@ -301,11 +302,16 @@ always@(posedge clk_video) begin
 			// 4bpp: shift rgbf every second pixel clock
 			if(h_cnt[0])
 				video_word <= { video_word[13:8], 2'b00, video_word[5:0], 2'b00 };
-		end else
+		end else begin
 			// 2bpp, shift green byte and red byte up one pixel
 			video_word <= { video_word[14:8], 1'b0, video_word[6:0], 1'b0 };
+		end
 	end
-
+	
+	if(h_cnt == 0) begin
+		VBlank <= (v_cnt >= V);
+	end
+	
 	// visible area?
 	if((v_cnt < V) && (h_cnt < H)) begin
 		if(mode) begin

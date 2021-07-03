@@ -40,7 +40,8 @@ module sdram (
 	input [15:0]  		din,			// data input from chipset/cpu
 	output [15:0] 		dout,			// data output to chipset/cpu
 	input [24:0]   	addr,       // 25 bit word address
-	input [1:0] 		ds,         // data strobe for hi/low byte
+	input 				uds,        // data strobe for hi byte
+	input 				lds,        // data strobe for low byte
 	input 		 		oe,         // cpu/chipset requests read
 	input 		 		we          // cpu/chipset requests write
 );
@@ -133,7 +134,7 @@ always @(posedge clk) begin
 		if(q <= STATE_CMD_START) begin	
 			sd_addr <= addr[20:8];
 			sd_ba <= addr[22:21];
-			sd_dqm <= { !ds[1], !ds[0] };
+			sd_dqm <= { !uds, !lds };
 		end else
 			sd_addr <= { 4'b0010, addr[23], addr[7:0]};
 	
