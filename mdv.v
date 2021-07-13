@@ -24,8 +24,6 @@ module mdv (
    input clk,               // 21mhz clock
 	input reset,
 	
-	input reverse,
-
    input mdv_drive,
    
 	input sel,               // select microdrive 1 or 2
@@ -165,16 +163,6 @@ always @(posedge mdv_clk) begin
 					mdv_gap_active <= 1'b1;          // now comes a gap
 					mdv_gap <= 1'b1;
 
-					if(reverse) begin
-						// The sectors on cartridges are written in descending order
-						// Some images seem to contain them in ascending order. So we
-				      // have to replay them backwards for better performance
-
-				      if(mem_addr == BASE_ADDR + 343 - 1)
-							mem_addr <= mdv_end - 343 + 1;
-						else
-							mem_addr <= mem_addr - 2*343 + 1;
-					end
 				end
 			end
 		end

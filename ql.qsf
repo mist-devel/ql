@@ -143,7 +143,7 @@ set_location_assignment PIN_43 -to SDRAM_CLK
 
 
 set_global_assignment -name ENABLE_SIGNALTAP ON
-set_global_assignment -name USE_SIGNALTAP_FILE stp1.stp
+set_global_assignment -name USE_SIGNALTAP_FILE stp_qlsd.stp
 set_global_assignment -name CYCLONEII_RESERVE_NCEO_AFTER_CONFIGURATION "USE AS REGULAR IO"
 set_global_assignment -name RESERVE_DATA0_AFTER_CONFIGURATION "USE AS REGULAR IO"
 set_global_assignment -name RESERVE_DATA1_AFTER_CONFIGURATION "USE AS REGULAR IO"
@@ -154,7 +154,7 @@ set_global_assignment -name OPTIMIZE_MULTI_CORNER_TIMING ON
 set_global_assignment -name FITTER_EFFORT "FAST FIT"
 set_global_assignment -name POWER_PRESET_COOLING_SOLUTION "23 MM HEAT SINK WITH 200 LFPM AIRFLOW"
 set_global_assignment -name POWER_BOARD_THERMAL_MODEL "NONE (CONSERVATIVE)"
-set_instance_assignment -name CURRENT_STRENGTH_NEW "MAXIMUM CURRENT" -to VGA_*
+set_global_assignment -name VERILOG_FILE sdram.v
 set_global_assignment -name SYSTEMVERILOG_FILE ql_timing.sv
 set_global_assignment -name VHDL_FILE TG68KdotC_Kernel.vhd
 set_global_assignment -name VHDL_FILE TG68K_Pack.vhd
@@ -193,7 +193,6 @@ set_global_assignment -name VHDL_FILE t8049_notri.vhd
 set_global_assignment -name VHDL_FILE ps2_intf.vhd
 set_global_assignment -name VERILOG_FILE keyboard.v
 set_global_assignment -name VERILOG_FILE data_io.v
-set_global_assignment -name VERILOG_FILE sdram.v
 set_global_assignment -name VERILOG_FILE osd.v
 set_global_assignment -name VERILOG_FILE user_io.v
 set_global_assignment -name QIP_FILE pll.qip
@@ -206,4 +205,6 @@ set_global_assignment -name VERILOG_FILE ipc.v
 set_global_assignment -name QIP_FILE rom_t49.qip
 set_global_assignment -name VERILOG_FILE zx8301.v
 set_global_assignment -name VERILOG_FILE zx8302.v
+set_global_assignment -name SIGNALTAP_FILE stp_delaytest.stp
+set_global_assignment -name SIGNALTAP_FILE stp_qlsd.stp
 set_instance_assignment -name PARTITION_HIERARCHY root_partition -to | -section_id Top
