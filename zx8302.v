@@ -46,8 +46,8 @@ module zx8302 (
 		input          mdv2_download,
 		
 		output 			mdv_seldrive,
+		output			mdv_active,
 
-		input          mdv_reverse,
 		output         led,
 		output         audio,
 		
@@ -266,8 +266,6 @@ mdv mdv (
    
 	.sel      ( mdv_sel[0]   ),
 
-	.reverse  ( mdv_reverse  ),
-
    // control bits	
 	.gap      ( mdv_gap      ),
 	.tx_empty ( mdv_tx_empty ),
@@ -293,8 +291,6 @@ mdv mdv2 (
    .mdv_drive ( 2 ),		//This is MDV2_
 	
    .sel      ( mdv_sel[1]   ),
-
-	.reverse  ( mdv_reverse  ),
 
    // control bits	
 	.gap      ( mdv2_gap      ),
@@ -329,6 +325,7 @@ end
 // Only one microdrive can be accessed at a time, this allows
 // switching between them.
 assign mdv_seldrive = mdv_sel[1]?1'b1:1'b0;
+assign mdv_active = mdv_sel[1] || mdv_sel[0];
 
 // ---------------------------------------------------------------------------------
 // -------------------------------------- RTC --------------------------------------

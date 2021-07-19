@@ -73,7 +73,7 @@ parameter CONF_STR = {
         "F,MDV,Load MDV1;",
         "F,MDV,Load MDV2;",
         "F,ROM;",
-        "O2,QL Speed,NO,YES;",
+        "O2,QL Speed,YES,NO;",
         "O3,RAM,128k,640k;",
         "O4,Video mode,PAL,NTSC;",
         "O5,Scanlines,Off,On;",
@@ -387,7 +387,7 @@ wire mdv2_read;
 wire [24:0] mdv_addr;
 wire [24:0] mdv2_addr;
 wire mdv_seldrive;	//1 for MDV2_ active, 0 for MDV1_ active or nothing
-
+wire mdv_active;		//Any active mdv
 
 wire audio;
 assign AUDIO_L = audio;
@@ -432,12 +432,11 @@ zx8302 zx8302 (
 	.mdv_men      ( mdv_men      ),
 	.video_cycle  ( video_cycle  ),
 	
-	.mdv_reverse  ( 0    ),
-
 	.mdv_download ( mdv_download ),
 	.mdv2_download ( mdv2_download ),
 	
-	.mdv_seldrive ( mdv_seldrive) ,
+	.mdv_seldrive ( mdv_seldrive ),
+	.mdv_active	  ( mdv_active   ),
 	
 	.mdv_dl_addr  ( dio_addr     )
 
@@ -569,33 +568,17 @@ pll pll (
 
 wire ram_delay_dtack;
 
-//old
-//ql_timing ql_timing (
-//	.clk_sys		( clk21 ),
-//	.reset		( reset ),
-//	.enable		( status[2] ),
-//	.ce_bus_p	( clk2 ),
-//	.VBlank		( VBlank ),
-//	.cpu_uds		( cpu_uds),
-//	.cpu_lds		( cpu_lds),
-//	.sdram_wr	( sdram_wr ),
-//	.sdram_oe	( sdram_oe ),
-//	.ram_delay_dtack (ram_delay_dtack)
-//);
-
-//new
 ql_timing ql_timing (
 	.clk_sys		( clk21 ),
 	.reset		( reset ),
-	.enable		( status[2] ),
+	.enable		( !status[2] ),
 	.ce_bus_p	( clk2 ),
-	.VBlank		( VBlank ),
-	.cpu_uds		( cpu_uds ),
-	.cpu_lds		( cpu_lds ),
-	.cpu_rw		( cpu_rw),
-	.cpu_rom		( cpu_rom),
+	.cpu_uds		( cpu_uds),
+	.cpu_lds		( cpu_lds),
+	.sdram_wr	( sdram_wr ),
+	.sdram_oe	( sdram_oe ),
+	.mdv_active	( mdv_active ),
 	.ram_delay_dtack (ram_delay_dtack)
 );
-
 
 endmodule
