@@ -30,8 +30,6 @@ module zx8301 (
 	
 	// config options
 	input  ntsc,
-	input  scandoubler,
-	input  scanlines,
 
 	// CPU interface to access $18063
 	input  clk_bus,
@@ -103,7 +101,6 @@ parameter NTSC_VBP = 2;     // unused time after vsync
    
 // both counters count from the begin of the visibla area
 reg [9:0] h_cnt;        // horizontal pixel counter
-reg [9:0] sd_h_cnt;     // scandoubler horizontal pixel counter
 reg [9:0] v_cnt;        // vertical pixel counter
 
 // swtich between ntsc and pal values
@@ -125,66 +122,11 @@ localparam YELLOW  = 3'b110;
 localparam WHITE   = 3'b111;
 
 /* ----------------------------------------------------------------- */
-/* ------------------------ VGA scandoubler ------------------------ */
-/* ----------------------------------------------------------------- */
-
-// scan doubler buffer can hold two lines
-reg [2:0] sd_buffer [1023:0];
-reg sd_scanline;
-reg sd_toggle;
-
-// the scandoubler alternates between two buffers
-// one is being written while the other one is being output
-always @(posedge clk_video)
-	if(h_cnt == H+hfp+hsw+hbp-1)
-		sd_toggle = !sd_toggle;
-
-// scandoubler horizontal pixel counter
-always@(posedge clk_vga) begin
-	// synchronize to 
-	if((!clk_video && (h_cnt==H+hfp+hsw+hbp-1)) ||
-		(sd_h_cnt==H+hfp+hsw+hbp-1))  sd_h_cnt <= 0;
-	else                             sd_h_cnt <= sd_h_cnt + 1;
-
-	// generate negative hsync signal
-	if(sd_h_cnt == H+hfp)     sd_hs <= 1'b0;
-	if(sd_h_cnt == H+hfp+hsw) begin	
-		sd_hs <= 1'b1;
-		sd_scanline <= !sd_scanline;
-	end
-	
-	if(v_cnt == V+vfp+vsw+vbp-1)
-		sd_scanline <= 1'b0;
-end
-
-// write to scandoubler buffer at QL pixel clock
-always @(posedge clk_video) begin
-	if(h_cnt < H) begin
-		if(v_cnt < V)
-			sd_buffer[{sd_toggle, h_cnt[8:0]}] <= mode?pixel_color_4bpp:pixel_color_2bpp;
-		else
-			sd_buffer[{sd_toggle, h_cnt[8:0]}] <= 3'b000;
-	end
-end
-
-// read from scandoubler buffer at twice QL pixel clock
-reg [2:0] sd_pixel;
-reg [2:0] sd_buffer_out;
-always @(posedge clk_vga) begin
-	sd_buffer_out <= sd_buffer[{~sd_toggle, sd_h_cnt[8:0]}];
-	if((sd_h_cnt > 1) && (sd_h_cnt <= H)) sd_pixel <= sd_buffer_out;
-	else                                  sd_pixel <= 3'b000;
-end
-//	sd_pixel <= (sd_h_cnt < H)?sd_buffer[{~sd_toggle, sd_h_cnt[8:0]}]:3'b000;
-//	sd_buffer_out <= sd_buffer[{~sd_toggle, sd_h_cnt[8:0]}];
-	
-/* ----------------------------------------------------------------- */
 /* -------------------- video timing generation -------------------- */
 /* ----------------------------------------------------------------- */
 
-// toggle between scandoubler hsync and ql hsync
-reg sd_hs, ql_hs;
-assign hs = scandoubler?sd_hs:ql_hs;
+reg ql_hs;
+assign hs = ql_hs;
 
 reg video_cycleD;
 reg [2:0] video_cycle_cnt;
@@ -332,13 +274,10 @@ always@(posedge clk_video) begin
 		ql_pixel <= 4'h0;
 end
 
-wire [2:0] pixel = blank?3'b000:scandoubler?sd_pixel:ql_pixel;
+wire [2:0] pixel = blank?3'b000:ql_pixel;
 
-// the current line is a scanline if the scandoubler is being used, if 
-// scanlines are emnabled and if it's a scanline 
-wire is_scanline = scandoubler && scanlines && sd_scanline;
-assign r = {(is_scanline?1'b0:pixel[2]), {5{pixel[2]}}};
-assign g = {(is_scanline?1'b0:pixel[1]), {5{pixel[1]}}};
-assign b = {(is_scanline?1'b0:pixel[0]), {5{pixel[0]}}};
+assign r = pixel[2];
+assign g = pixel[1];
+assign b = pixel[0];
 
 endmodule

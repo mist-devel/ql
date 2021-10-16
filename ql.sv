@@ -76,63 +76,63 @@ parameter CONF_STR = {
         "O2,QL Speed,YES,NO;",
         "O3,RAM,128k,640k;",
         "O4,Video mode,PAL,NTSC;",
-        "O5,Scanlines,Off,On;",
-        "T6,Reset"
+        "O56,Scanlines,Off,25%,50%,75%;",
+        "T0,Reset"
 };
 
-parameter CONF_STR_LEN = 4+16+16+6+19+17+23+20+8;
-
 // the status register is controlled by the on screen display (OSD)
-wire [7:0] status;
+wire [63:0] status;
 wire tv15khz;
 wire [1:0] buttons;
+wire ypbpr, no_csync;
 
 wire [7:0] js0, js1;
+
+wire       ntsc      = status[4];
+wire [1:0] scanlines = status[6:5];
 
 wire ps2_kbd_clk, ps2_kbd_data;
 wire ps2_mouse_clk, ps2_mouse_data;
 
-// generate ps2_clock
-wire ps2_clock = ps2_clk_div[6];  // ~20khz
-reg [6:0] ps2_clk_div;
-always @(posedge clk2)
-	ps2_clk_div <= ps2_clk_div + 7'd1;
-
 // include user_io module for arm controller communication
-user_io #(.STRLEN(CONF_STR_LEN)) user_io ( 
-      .conf_str       ( CONF_STR       ),
+user_io #(.STRLEN($size(CONF_STR)>>3)) user_io (
+	.clk_sys        ( clk21          ),
+	.clk_sd         ( clk42          ),
+	.conf_str       ( CONF_STR       ),
 
-      .SPI_CLK        ( SPI_SCK        ),
-      .SPI_SS_IO      ( CONF_DATA0     ),
-      .SPI_MISO       ( SPI_DO         ),
-      .SPI_MOSI       ( SPI_DI         ),
+	.SPI_CLK        ( SPI_SCK        ),
+	.SPI_SS_IO      ( CONF_DATA0     ),
+	.SPI_MISO       ( SPI_DO         ),
+	.SPI_MOSI       ( SPI_DI         ),
 
-		.scandoubler_disable ( tv15khz   ),
-		.buttons        ( buttons        ),
+	.scandoubler_disable ( tv15khz   ),
+	.buttons        ( buttons        ),
 
-		.joystick_0     ( js0            ),
-		.joystick_1     ( js1            ),
-		
-      // ps2 interface
-      .ps2_clk        ( ps2_clock      ),
-      .ps2_kbd_clk    ( ps2_kbd_clk    ),
-      .ps2_kbd_data   ( ps2_kbd_data   ),
-      .ps2_mouse_clk  ( ps2_mouse_clk  ),
-      .ps2_mouse_data ( ps2_mouse_data ),
+	.joystick_0     ( js0            ),
+	.joystick_1     ( js1            ),
 
-      .status         ( status         ),
-		
-		// interface to embedded legacy sd card wrapper
-		.sd_lba     	( sd_lba				),
-		.sd_rd      	( sd_rd				),
-		.sd_wr      	( sd_wr				),
-		.sd_ack     	( sd_ack				),
-		.sd_conf    	( sd_conf			),
-		.sd_sdhc    	( sd_sdhc			),
-		.sd_dout    	( sd_dout			),
-		.sd_dout_strobe (sd_dout_strobe	),
-		.sd_din     	( sd_din				),
-		.sd_din_strobe ( sd_din_strobe	)
+	// ps2 interface
+	.ps2_kbd_clk    ( ps2_kbd_clk    ),
+	.ps2_kbd_data   ( ps2_kbd_data   ),
+	.ps2_mouse_clk  ( ps2_mouse_clk  ),
+	.ps2_mouse_data ( ps2_mouse_data ),
+
+	.status         ( status         ),
+	.ypbpr          ( ypbpr          ),
+	.no_csync       ( no_csync       ),
+
+	// interface to embedded legacy sd card wrapper
+	.sd_lba         ( sd_lba         ),
+	.sd_rd          ( sd_rd          ),
+	.sd_wr          ( sd_wr          ),
+	.sd_ack         ( sd_ack         ),
+	.sd_ack_conf    ( sd_ack_conf    ),
+	.sd_conf        ( sd_conf        ),
+	.sd_sdhc        ( sd_sdhc        ),
+	.sd_dout        ( sd_dout        ),
+	.sd_dout_strobe ( sd_dout_strobe ),
+	.sd_din         ( sd_din         ),
+	.sd_buff_addr   ( sd_buff_addr   )
 );
 
 // -------------------------------------------------------------------------
@@ -144,34 +144,37 @@ user_io #(.STRLEN(CONF_STR_LEN)) user_io (
 wire [31:0] sd_lba;
 wire sd_rd;
 wire sd_wr;
-wire sd_ack;
+wire sd_ack, sd_ack_conf;
 wire sd_conf;
 wire sd_sdhc; 
 wire [7:0] sd_dout;
 wire sd_dout_strobe;
 wire [7:0] sd_din;
 wire sd_din_strobe;
+wire [8:0] sd_buff_addr;
 
 sd_card sd_card (
-		// connection to io controller
-		.io_lba 			( sd_lba 			),
-		.io_rd  			( sd_rd				),
-		.io_wr  			( sd_wr				),
-		.io_ack 			( sd_ack				),
-		.io_conf 		( sd_conf			),
-		.io_sdhc 		( sd_sdhc			),
-		.io_din 			( sd_dout			),
-		.io_din_strobe ( sd_dout_strobe	),
-		.io_dout 		( sd_din				),
-		.io_dout_strobe( sd_din_strobe	),
- 
-		.allow_sdhc 	( 1'b1				),   // QLSD supports SDHC
+	.clk_sys         ( clk42          ),   // at least 2xsd_sck
+	// connection to io controller
+	.sd_lba          ( sd_lba         ),
+	.sd_rd           ( sd_rd          ),
+	.sd_wr           ( sd_wr          ),
+	.sd_ack          ( sd_ack         ),
+	.sd_conf         ( sd_conf        ),
+	.sd_ack_conf     ( sd_ack_conf    ),
+	.sd_sdhc         ( sd_sdhc        ),
+	.sd_buff_dout    ( sd_dout        ),
+	.sd_buff_wr      ( sd_dout_strobe ),
+	.sd_buff_din     ( sd_din         ),
+	.sd_buff_addr    ( sd_buff_addr   ),
 
-		// connection to local CPU
-		.sd_cs   		( sd_cs         	),
-		.sd_sck  		( sd_sck				),
-		.sd_sdi  		( sd_sdi				),
-		.sd_sdo  		( sd_sdo 	    	)
+	.allow_sdhc 	( 1'b1            ),   // QLSD supports SDHC
+
+	// connection to local CPU
+	.sd_cs   		( sd_cs           ),
+	.sd_sck  		( sd_sck          ),
+	.sd_sdi  		( sd_sdi          ),
+	.sd_sdo  		( sd_sdo          )
 );
 
 wire qlsd_rd = cpu_rom && (cpu_addr[15:0] == 16'hfee4);  // only one register actually returns data
@@ -179,18 +182,18 @@ wire [7:0] qlsd_dout;
 wire sd_cs, sd_sck, sd_sdi, sd_sdo;
 
 qlromext qlromext (
-		.clk				( CLOCK_27[0]		),   // fastest we can offer
-		.clk_bus       ( clk2            ),
-		.romoel        ( !(cpu_rom && cpu_cycle) ),
-		.a       		( cpu_addr[15:0]	),
-		.d             ( qlsd_dout       ),
-		.sd_do         ( sd_sdo          ),
-		.sd_cs1l       ( sd_cs           ),
-		.sd_clk        ( sd_sck          ),
-		.sd_di         ( sd_sdi          ),
-		.io2           ( 1'b0            )
-); 
-			
+	.clk           ( clk21          ),   // fastest we can offer
+	.clk_bus       ( clk2           ),
+	.romoel        ( !(cpu_rom && cpu_cycle) ),
+	.a             ( cpu_addr[15:0]	),
+	.d             ( qlsd_dout      ),
+	.sd_do         ( sd_sdo         ),
+	.sd_cs1l       ( sd_cs          ),
+	.sd_clk        ( sd_sck         ),
+	.sd_di         ( sd_sdi         ),
+	.io2           ( 1'b0           )
+);
+
 // -------------------------------------------------------------------------
 // ---------------- interface to the external sdram ------------------------
 // -------------------------------------------------------------------------
@@ -264,26 +267,26 @@ wire dio_write;
 // this receives a byte stream from the arm io controller via spi and 
 // writes it into sdram
 data_io data_io (
-   // io controller spi interface
-   .sck ( SPI_SCK ),
-   .ss  ( SPI_SS2 ),
-   .sdi ( SPI_DI  ),
+	// io controller spi interface
+	.sck ( SPI_SCK ),
+	.ss  ( SPI_SS2 ),
+	.sdi ( SPI_DI  ),
 
-   .downloading ( dio_download ),  // signal indicating an active rom download
+	.downloading ( dio_download ),  // signal indicating an active rom download
 	.index       ( dio_index ),
   
-   // external ram interface
-   .clk   ( cpu_cycle ),
-   .wr    ( dio_write ),
-   .addr  ( dio_addr  ),
-   .data  ( dio_data  )
+	// external ram interface
+	.clk   ( cpu_cycle ),
+	.wr    ( dio_write ),
+	.addr  ( dio_addr  ),
+	.data  ( dio_data  )
 );
-                   
+
 // ---------------------------------------------------------------------------------
 // -------------------------------------- video ------------------------------------
 // ---------------------------------------------------------------------------------
 
-wire [5:0] video_r, video_g, video_b;
+wire video_r, video_g, video_b;
 wire video_hs, video_vs;
 wire VBlank;
 
@@ -295,66 +298,70 @@ wire zx8301_cs = cpu_cycle && cpu_io &&
 	({cpu_addr[6:5], cpu_addr[1]} == 3'b111)&& cpu_wr && cpu_lds;	
 
 zx8301 zx8301 (
-    .reset        ( reset         ),
- 	 .clk_vga		( clk21        ),
-	 .clk_video		( clk10      ),
-	 .video_cycle  ( video_cycle   ),
+	.reset        ( reset         ),
+	.clk_vga      ( clk21        ),
+	.clk_video    ( clk10      ),
+	.video_cycle  ( video_cycle   ),
 
-	 .ntsc         ( status[4]     ),
-	 .scandoubler  ( !tv15khz      ),
-	 .scanlines    ( status[5]     ),
+	.ntsc         ( ntsc     ),
 
-	 .clk_bus      ( clk2     ),
-	 .cpu_cs       ( zx8301_cs     ),
-	 .cpu_data     ( cpu_dout[7:0] ),
+	.clk_bus      ( clk2     ),
+	.cpu_cs       ( zx8301_cs     ),
+	.cpu_data     ( cpu_dout[7:0] ),
 
-	 .mdv_men      ( mdv_men       ),
+	.mdv_men      ( mdv_men       ),
 	 
-	 .addr         ( video_addr    ),
-	 .din          ( sdram_dout    ),
-	 .rd           ( video_rd      ),
+	.addr         ( video_addr    ),
+	.din          ( sdram_dout    ),
+	.rd           ( video_rd      ),
 	 
-	 .hs           ( video_hs      ),
-	 .vs           ( video_vs      ),
-	 .r            ( video_r       ),
-	 .g            ( video_g       ),
-	 .b            ( video_b       ),
-	 .VBlank			( VBlank			 )
+	.hs           ( video_hs      ),
+	.vs           ( video_vs      ),
+	.r            ( video_r       ),
+	.g            ( video_g       ),
+	.b            ( video_b       ),
+	.VBlank			( VBlank			 )
 );
 
+mist_video #(.COLOR_DEPTH(1), .OSD_COLOR(3'd5), .SD_HCNT_WIDTH(11)) mist_video (
+	.clk_sys     ( clk21      ),
 
-// csync for tv15khz
-// QLs vsync is positive, QLs hsync is negative
-wire vga_csync = !(!vga_hsync ^ vga_vsync);
-wire vga_hsync, vga_vsync;
+	// OSD SPI interface
+	.SPI_SCK     ( SPI_SCK    ),
+	.SPI_SS3     ( SPI_SS3    ),
+	.SPI_DI      ( SPI_DI     ),
 
-// TV SCART has csync on hsync pin and "high" on vsync pin
-assign VGA_VS = tv15khz?1'b1:vga_vsync;
-assign VGA_HS = tv15khz?vga_csync:vga_hsync;
+	// scanlines (00-none 01-25% 10-50% 11-75%)
+	.scanlines   ( scanlines  ),
 
-// tv15hkz has half the pixel rate		  
-wire osd_clk = tv15khz?clk10:clk21;
+	// non-scandoubled pixel clock divider 0 - clk_sys/4, 1 - clk_sys/2
+	.ce_divider  ( 1'b1       ),
 
-// include the on screen display
-osd #(12,0,5) osd (
-   .pclk       ( osd_clk     ),
+	// 0 = HVSync 31KHz, 1 = CSync 15KHz
+	.scandoubler_disable ( tv15khz ),
+	// disable csync without scandoubler
+	.no_csync    ( no_csync   ),
+	// YPbPr always uses composite sync
+	.ypbpr       ( ypbpr      ),
+	// Rotate OSD [0] - rotate [1] - left or right
+	.rotate      ( 2'b00      ),
+	// composite-like blending
+	.blend       ( 1'b0       ),
 
-   // spi for OSD
-   .sdi        ( SPI_DI       ),
-   .sck        ( SPI_SCK      ),
-   .ss         ( SPI_SS3      ),
+	// video in
+	.R           ( video_r    ),
+	.G           ( video_g    ),
+	.B           ( video_b    ),
 
-   .red_in     ( video_r      ),
-   .green_in   ( video_g      ),
-   .blue_in    ( video_b      ),
-   .hs_in      ( video_hs     ),
-   .vs_in      ( video_vs     ),
+	.HSync       ( video_hs   ),
+	.VSync       ( ~video_vs  ),
 
-   .red_out    ( VGA_R        ),
-   .green_out  ( VGA_G        ),
-   .blue_out   ( VGA_B        ),
-   .hs_out     ( vga_hsync    ),
-   .vs_out     ( vga_vsync    )
+	// MiST video output signals
+	.VGA_R       ( VGA_R      ),
+	.VGA_G       ( VGA_G      ),
+	.VGA_B       ( VGA_B      ),
+	.VGA_VS      ( VGA_VS     ),
+	.VGA_HS      ( VGA_HS     )
 );
 
 // ---------------------------------------------------------------------------------
@@ -365,10 +372,10 @@ wire rom_download = dio_download && (dio_index == 0 || dio_index == 3);
 reg [11:0] reset_cnt;
 wire reset = (reset_cnt != 0);
 always @(posedge clk2) begin
-	if(buttons[1] || status[0] || status[6] || !pll_locked || rom_download)
+	if(buttons[1] || status[0] || !pll_locked || rom_download)
 		reset_cnt <= 12'hfff;
 	else if(reset_cnt != 0)
-		reset_cnt <= reset_cnt - 1;
+		reset_cnt <= reset_cnt - 1'd1;
 end
 
 // ---------------------------------------------------------------------------------
@@ -533,7 +540,7 @@ TG68KdotC_Kernel #(0,0,0,0,0,0) tg68k (
 // -------------------------------------------------------------------------
 					
 reg clk10;  // 10.5 MHz QL pixel clock
-wire clk21;
+wire clk21, clk42;
 always @(posedge clk21)
 	clk10 <= !clk10;
 
@@ -552,15 +559,16 @@ always @(posedge clk2)
 	video_cycle <= !video_cycle;
 
 wire pll_locked;
+
+assign SDRAM_CLK = clk21;
 	
 // A PLL to derive the system clock from the MiSTs 27MHz
 pll pll (
-	 .inclk0( CLOCK_27[0] ),
-	 .c0(     clk21      ),       // 21.000 MHz
-	 .c1(     SDRAM_CLK   ),       // 21.000 MHz phase shifted
-	 .locked( pll_locked  )
+	.inclk0( CLOCK_27[0] ),
+	.c0    ( clk21       ),       // 21.000 MHz
+	.c1    ( clk42       ),       // 42.000 MHz
+	.locked( pll_locked  )
 );
-
 
 // ---------------------------------------------------------------------------------
 // -------------------------------------- QL RAM timing-----------------------------
